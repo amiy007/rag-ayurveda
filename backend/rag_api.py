@@ -74,30 +74,56 @@ class VectorStoreManager:
         """Get or create the FAISS vector store."""
         if not hasattr(self, '_vectorstore') or self._vectorstore is None:
             try:
+                logger.info(f"Initializing vector store from {self.vectorstore_dir}")
+                
                 # Create directory if it doesn't exist
                 self.vectorstore_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Check if vector store files exist
-                index_file = self.vectorstore_dir / "index.faiss"
-                if index_file.exists():
-                    self._vectorstore = FAISS.load_local(
-                        folder_path=str(self.vectorstore_dir),
-                        embeddings=self.embeddings,
-                        allow_dangerous_deserialization=True
+                # Try both possible index file names
+                index_names = ["faiss_index", "index"]
+                loaded = False
+                
+                for index_name in index_names:
+                    index_file = self.vectorstore_dir / f"{index_name}.faiss"
+                    pkl_file = self.vectorstore_dir / f"{index_name}.pkl"
+                    
+                    logger.info(f"Checking for vector store files with index name '{index_name}' in {self.vectorstore_dir}:")
+                    logger.info(f"- {index_name}.faiss exists: {index_file.exists()}")
+                    logger.info(f"- {index_name}.pkl exists: {pkl_file.exists()}")
+                    
+                    if index_file.exists() and pkl_file.exists():
+                        try:
+                            logger.info(f"Both index files found for '{index_name}', attempting to load vector store...")
+                            self._vectorstore = FAISS.load_local(
+                                folder_path=str(self.vectorstore_dir),
+                                embeddings=self.embeddings,
+                                index_name=index_name,
+                                allow_dangerous_deserialization=True
+                            )
+                            logger.info(f"Successfully loaded vector store with {self._vectorstore.index.ntotal} documents")
+                            loaded = True
+                            break  # Successfully loaded, exit the loop
+                        except Exception as load_error:
+                            logger.error(f"Error loading vector store with index '{index_name}': {str(load_error)}", exc_info=True)
+                            continue  # Try the next index name
+                
+                if not loaded:
+                    logger.warning("No valid vector store index found. Creating in-memory vector store with placeholder document.")
+                    self._vectorstore = FAISS.from_texts(
+                        texts=["This is a placeholder document. Please add your documents to the vector store."],
+                        embedding=self.embeddings
                     )
-                    logger.info(f"Loaded existing vector store from {self.vectorstore_dir}")
-                else:
-                    raise FileNotFoundError("No existing vector store found")
+                    logger.warning(f"Created new vector store with {self._vectorstore.index.ntotal} documents")
                     
             except Exception as e:
-                logger.error(f"Error loading vector store: {str(e)}")
+                logger.error(f"Error in get_vectorstore: {str(e)}")
+                logger.info("Creating in-memory vector store with placeholder document")
                 # Create a minimal vector store with a dummy document
                 self._vectorstore = FAISS.from_texts(
                     texts=["This is a placeholder document. Please add your documents to the vector store."],
                     embedding=self.embeddings
                 )
-                # Don't save the dummy vector store to avoid overwriting
-                logger.warning("Created in-memory vector store with placeholder document")
+                logger.warning(f"Created new vector store with {self._vectorstore.index.ntotal} documents")
                 
         if self._vectorstore is None:
             raise HTTPException(
@@ -110,8 +136,11 @@ class VectorStoreManager:
     async def search_similar_documents(self, query: str, k: int = 5, score_threshold: float = 0.5) -> List[dict]:
         """Search for similar documents in the vector store."""
         try:
-            logger.info(f"Searching for query: {query}")
+            logger.info(f"Searching for query: '{query}' with k={k}, score_threshold={score_threshold}")
+            
+            # Get the vector store
             vectorstore = self.get_vectorstore()
+            logger.info(f"Vector store type: {type(vectorstore).__name__}")
             
             # Check if we have a valid vector store
             if vectorstore is None:
@@ -119,25 +148,39 @@ class VectorStoreManager:
                 return []
                 
             if not hasattr(vectorstore, 'similarity_search_with_score'):
-                logger.error(f"Vector store missing similarity_search_with_score method. Available methods: {dir(vectorstore)}")
+                available_methods = [m for m in dir(vectorstore) if not m.startswith('_')]
+                logger.error(f"Vector store missing similarity_search_with_score. Available methods: {available_methods}")
                 return []
             
             try:
-                logger.info("Executing similarity search...")
+                logger.info(f"Executing similarity search with query: '{query}'")
                 docs_and_scores = vectorstore.similarity_search_with_score(query, k=k)
-                logger.info(f"Found {len(docs_and_scores)} results")
+                logger.info(f"Search completed. Found {len(docs_and_scores)} raw results")
                 
                 # Format results with similarity scores (1.0 - distance)
                 results = []
-                for doc, score in docs_and_scores:
-                    similarity = 1.0 - score  # Convert distance to similarity
-                    if similarity >= score_threshold:
-                        results.append({
-                            "content": doc.page_content,
-                            "metadata": doc.metadata if hasattr(doc, 'metadata') else {},
-                            "score": float(similarity)
-                        })
+                for i, (doc, score) in enumerate(docs_and_scores):
+                    try:
+                        similarity = 1.0 - score  # Convert distance to similarity
+                        if similarity >= score_threshold:
+                            result = {
+                                "content": doc.page_content,
+                                "metadata": {},
+                                "score": float(similarity)
+                            }
+                            
+                            # Safely get metadata
+                            if hasattr(doc, 'metadata') and doc.metadata:
+                                result["metadata"] = doc.metadata
+                            
+                            logger.debug(f"Result {i+1} - Score: {similarity:.2f}")
+                            results.append(result)
+                        
+                    except Exception as e:
+                        logger.warning(f"Error processing search result {i+1}: {str(e)}")
+                        continue
                 
+                logger.info(f"Returning {len(results)} filtered results (from {len(docs_and_scores)} total)")
                 return results
                 
             except Exception as search_error:
@@ -197,14 +240,23 @@ async def search_remedies(
             score_threshold=score_threshold
         )
         
-        # Generate response if requested and we have results
+        # Generate response if requested
         generated = None
-        if generate_response and results:
+        if generate_response:
             try:
-                # Use the top results as context
-                context = [result["content"] for result in results[:3]]  # Use top 3 results as context
+                if results:
+                    # Use the top results as context
+                    context = [result["content"] for result in results[:3]]  # Use top 3 results as context
+                    prompt = query
+                else:
+                    # No relevant results found, use LLM with a note about limited context
+                    context = []
+                    prompt = f"{query} \n\nNote: I couldn't find specific information in my knowledge base about this topic. " \
+                            f"Here's a general response, but please consult with a healthcare professional " \
+                            f"for personalized advice.\n\n"
+                
                 generated = await vectorstore_manager.generate_response(
-                    query=query,
+                    query=prompt,
                     context=context,
                     model=model,
                     temperature=temperature,
@@ -212,10 +264,31 @@ async def search_remedies(
                 )
             except Exception as e:
                 logger.warning(f"Model response generation failed: {str(e)}")
+                if not results:
+                    # If we have no results and generation fails, provide a helpful message
+                    generated = {
+                        "response": "I couldn't find specific information about this in my knowledge base. " \
+                                  "Please consult with a qualified healthcare professional for personalized advice.",
+                        "model": "fallback",
+                        "metadata": {"warning": "No relevant context found and model generation failed"}
+                    }
         
+        # Ensure results are properly formatted
+        formatted_results = []
+        for r in results:
+            try:
+                formatted_results.append(SearchResult(
+                    content=r.get('content', ''),
+                    metadata=r.get('metadata', {}),
+                    score=r.get('score', 0.0)
+                ))
+            except Exception as e:
+                logger.warning(f"Error formatting result: {str(e)}")
+                continue
+                
         return SearchResponse(
-            results=[SearchResult(**r) for r in results],
-            total_results=len(results),
+            results=formatted_results,
+            total_results=len(formatted_results),
             generated_response=GenerateResponse(**generated) if generated else None
         )
         

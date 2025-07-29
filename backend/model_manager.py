@@ -60,12 +60,30 @@ class ModelManager:
     def _format_prompt(self, prompt: str, context: List[str]) -> str:
         if not context:
             return prompt
-        ctx = "\n\n".join(f"Context {i+1}: {c}" for i, c in enumerate(context))
-        return f"""Use this context to answer the question:
-{ctx}
+            
+        # Join all context with clear separation
+        context_str = "\n\n".join([
+            f"--- CONTEXT {i+1} ---\n{text.strip()}"
+            for i, text in enumerate(context) if text.strip()
+        ])
+        
+        # Create a more structured prompt
+        return f"""You are an expert in Ayurveda providing remedies and health advice. 
+Use the following context to answer the question. If the context doesn't contain 
+enough information, say "I don't have enough information about this in my knowledge base."
 
-Question: {prompt}
-Answer:"""
+CONTEXT:
+{context_str}
+
+QUESTION: {prompt}
+
+INSTRUCTIONS:
+1. Provide a clear, concise answer based on the context
+2. If the context mentions specific remedies, list them clearly
+3. Include relevant details like preparation methods and usage instructions
+4. If the context doesn't contain enough information, say so
+
+ANSWER:"""
     
     async def _call_ollama(self, prompt: str, model: str = "mistral", **kwargs) -> ModelResponse:
         import ollama
@@ -81,12 +99,18 @@ Answer:"""
         )
     
     async def _call_gemini(self, prompt: str, **kwargs) -> ModelResponse:
-        """Generate text using Gemini 2.0 Flash API."""
+        """Generate text using Gemini 2.0 Flash API with enhanced context handling."""
         if not self.gemini_config:
             raise ValueError("Gemini configuration not available")
             
         url = f"{self.gemini_config.api_base}/gemini-2.0-flash:generateContent"
         params = {'key': self.gemini_config.api_key}
+        
+        # Enhanced system instruction for better responses
+        system_instruction = """You are an expert in Ayurveda and natural remedies. 
+        Provide accurate, helpful, and safe information based on the provided context. 
+        If the context doesn't contain enough information, clearly state that.
+        Be specific about dosages, preparations, and usage instructions when possible."""
         
         payload = {
             'contents': [{
@@ -94,10 +118,32 @@ Answer:"""
                 'parts': [{'text': prompt}]
             }],
             'generationConfig': {
-                'temperature': kwargs.get('temperature', 0.7),
+                'temperature': min(0.7, kwargs.get('temperature', 0.5)),  # Cap temperature for more factual responses
                 'maxOutputTokens': kwargs.get('max_tokens', 1000),
-                'topP': 0.95,
-                'topK': 40
+                'topP': 0.9,  # Slightly more focused than default
+                'topK': 40,
+                'stopSequences': ['---']  # Prevent model from making up additional context
+            },
+            'safetySettings': [
+                {
+                    'category': 'HARM_CATEGORY_HARASSMENT',
+                    'threshold': 'BLOCK_NONE'
+                },
+                {
+                    'category': 'HARM_CATEGORY_HATE_SPEECH',
+                    'threshold': 'BLOCK_NONE'
+                },
+                {
+                    'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+                    'threshold': 'BLOCK_NONE'
+                },
+                {
+                    'category': 'HARM_CATEGORY_DANGEROUS_CONTENT',
+                    'threshold': 'BLOCK_NONE'
+                }
+            ],
+            'systemInstruction': {
+                'parts': [{'text': system_instruction}]
             }
         }
         
