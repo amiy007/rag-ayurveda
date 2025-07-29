@@ -1,0 +1,22 @@
+# Core Dependencies
+fastapi>=0.95.0
+uvicorn>=0.21.0
+python-multipart>=0.0.6
+pydantic>=1.10.4
+
+# PDF Processing
+pymupdf>=1.21.0
+
+# Vector Database and Embeddings
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.2
+
+# LangChain
+langchain>=0.0.200
+langchain-community>=0.0.10
+
+# Local LLM (Ollama)
+ollama>=0.1.5
+
+# Environment Variables
+python-dotenv>=1.0.0
