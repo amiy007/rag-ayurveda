@@ -44,17 +44,19 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const url = 'http://localhost:8000/search';
+      const params = new URLSearchParams({
+        query: input,
+        k: '3',
+        generate_response: 'true',
+        model: 'gemini' // Using gemini as the default model as per user's example
+      });
+      
+      const url = `http://localhost:8000/search?${params.toString()}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({
-          query: input,
-          k: 3,
-          generate_response: true
-        })
       });
       
       if (!res.ok) {
@@ -62,26 +64,26 @@ export default function ChatPage() {
       }
       
       const data = await res.json();
-      if (data?.results && Array.isArray(data.results) && data.results.length > 0) {
-        const sortedResults = [...data.results].sort((a, b) => b.score - a.score);
-        const topResult = sortedResults[0];
-        setMessages((msgs) => [
-          ...msgs,
-          {
-            from: "bot",
-            text: data.generated_response?.text || "",
-            results: [topResult],
-          },
-        ]);
-      } else {
-        setMessages((msgs) => [
-          ...msgs,
-          {
-            from: "bot",
-            text: "🌱 (No results found)",
-          },
-        ]);
-      }
+      
+      // Sort results by score in descending order
+      const sortedResults = data?.results && Array.isArray(data.results)
+        ? [...data.results].sort((a, b) => b.score - a.score)
+        : [];
+      
+      // Get the generated response or use a default message
+      const responseText = data.generated_response?.response || 
+        (sortedResults.length > 0 
+          ? "Here's what I found in the Ayurvedic knowledge base:"
+          : "I couldn't find specific information about this in the knowledge base. Could you try rephrasing your question?");
+      
+      setMessages((msgs) => [
+        ...msgs,
+        {
+          from: "bot",
+          text: responseText,
+          results: sortedResults.slice(0, 3), // Show top 3 results
+        },
+      ]);
     } catch {
       setMessages((msgs) => [
         ...msgs,
@@ -103,35 +105,58 @@ export default function ChatPage() {
       <div className={styles.centerBox}>
         <h1 className={styles.title}>Ayurveda Chatbot</h1>
         <div className={styles.chatWindow}>
-          {messages.map((msg, msgIdx) =>
-            msg.from === "bot" && msg.results ? (
-              msg.results.map((res, resIdx) => (
-                <div key={resIdx} className={styles.botMsg}>
-                  <div>{res.content}</div>
-                  <button
-                    className={styles.metaBtn}
-                    onClick={() => handleShowMeta(msgIdx, resIdx)}
-                    type="button"
-                  >
-                    {showMeta[`${msgIdx}-${resIdx}`] ? "Hide Source" : "Show Source"}
-                  </button>
-                  {showMeta[`${msgIdx}-${resIdx}`] && (
-                    <div className={styles.metaInfo}>
-                      <span>Source: {res.metadata.source}</span>
-                      <span>Page: {res.metadata.page}</span>
-                    </div>
-                  )}
+          {messages.map((msg, msgIdx) => {
+            if (msg.from === "bot" && msg.results && msg.results.length > 0) {
+              return (
+                <div key={msgIdx} className={styles.botMsg}>
+                  {/* LLM Response */}
+                  <div className={styles.botText}>
+                    {msg.text}
+                  </div>
+                  
+                  {/* Search Results */}
+                  <div className={styles.searchResults}>
+                    <div className={styles.resultsHeader}>Relevant Information:</div>
+                    {msg.results.map((res, resIdx) => (
+                      <div key={resIdx} className={styles.resultItem}>
+                        <div className={styles.resultContent}>
+                          {res.content.split('\n').map((paragraph, pIdx) => (
+                            <p key={pIdx} className={styles.resultParagraph}>
+                              {paragraph}
+                            </p>
+                          ))}
+                        </div>
+                        <button
+                          className={styles.metaBtn}
+                          onClick={() => handleShowMeta(msgIdx, resIdx)}
+                          type="button"
+                        >
+                          {showMeta[`${msgIdx}-${resIdx}`] ? "Hide Source" : "Show Source"}
+                        </button>
+                        {showMeta[`${msgIdx}-${resIdx}`] && (
+                          <div className={styles.metaInfo}>
+                            <div><strong>Source:</strong> {res.metadata.source}</div>
+                            <div><strong>Page:</strong> {res.metadata.page}</div>
+                            <div><strong>Relevance Score:</strong> {res.score.toFixed(2)}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))
-            ) : (
+              );
+            }
+            
+            // Regular message (user or bot without results)
+            return (
               <div
                 key={msgIdx}
                 className={msg.from === "user" ? styles.userMsg : styles.botMsg}
               >
                 {msg.text}
               </div>
-            )
-          )}
+            );
+          })}
           {loading && (
             <div className={styles.botMsg}>
               <span className={styles.loader}></span>
