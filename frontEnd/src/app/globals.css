@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root {
+  /* Ayurvedic color palette */
+  --color-ayurveda-green: #2E7D32;
+  --color-ayurveda-light: #F5F5DC;
+  --color-ayurveda-gold: #D4AF37;
+  --color-ayurveda-brown: #5D4037;
+  --color-ayurveda-red: #C62828;
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  @apply bg-ayurveda-light text-ayurveda-brown;
+  font-family: 'Poppins', sans-serif;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-ayurveda-green text-white px-6 py-2 rounded-lg hover:bg-opacity-90 transition-all duration-200;
+  }
+  
+  .chat-bubble {
+    @apply p-4 rounded-lg max-w-[80%] my-2;
+  }
+  
+  .user-bubble {
+    @apply bg-ayurveda-green text-white self-end;
+  }
+  
+  .bot-bubble {
+    @apply bg-white text-ayurveda-brown border border-ayurveda-green self-start;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-ayurveda-light;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-ayurveda-green rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-opacity-80;
+}
