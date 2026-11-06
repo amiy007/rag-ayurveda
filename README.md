@@ -20,7 +20,7 @@ A Retrieval-Augmented Generation (RAG) chatbot for Ayurvedic home remedies, buil
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/rag-ayurveda-chatbot.git
+   git clone https://github.com/amiy007/rag-ayurveda-chatbot.git
    cd rag-ayurveda-chatbot/backend
    ```
 
